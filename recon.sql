@@ -2,20 +2,19 @@ CREATE TABLE recon_settings
  (
   main_package_name VARCHAR2(30) DEFAULT 'R_' NOT NULL
  ,types_package_name VARCHAR2(30) DEFAULT 'T_' NOT NULL
+ ,default_schema VARCHAR2(30)
  ,rowtype_schema_param_name VARCHAR2(30) DEFAULT 'SCHEMA__' NOT NULL
- ,rowtype_default_mode_param_name VARCHAR2(30) DEFAULT 'DEFAULTS__' NOT NULL
- ,rowtype_default_schema VARCHAR2(30) DEFAULT sys_context('userenv', 'current_schema') --???
- ,rowtype_default_values_mode VARCHAR2(30) DEFAULT 'NULL' NOT NULL
- ,records_schema_param_name VARCHAR2(30) DEFAULT 'SCHEMA__' NOT NULL
- ,records_package_param_name VARCHAR2(30) DEFAULT 'PACKAGE__' NOT NULL
- ,records_default_schema VARCHAR2(30) DEFAULT sys_context('userenv', 'current_schema') --???
- ,records_default_package VARCHAR2(30)
- ,records_default_values_mode VARCHAR2(30) DEFAULT 'NULL'
- ,asarray_schema_param_name VARCHAR2(30) DEFAULT 'SCHEMA__' NOT NULL
- ,asarray_package_param_name VARCHAR2(30) DEFAULT 'PACKAGE__' NOT NULL
- ,asarray_default_schema VARCHAR2(30) DEFAULT sys_context('userenv', 'current_schema') --???
- ,asarray_default_package VARCHAR2(30)
- ,asarray_max_items NUMBER(3) DEFAULT 128 NOT NULL
+ ,rowtype_defaults_param_name VARCHAR2(30) DEFAULT 'DEFAULTS__' NOT NULL
+ ,rowtype_default_defaults VARCHAR2(30) DEFAULT 'NULL' NOT NULL
+ ,record_schema_param_name VARCHAR2(30) DEFAULT 'SCHEMA__' NOT NULL
+ ,record_package_param_name VARCHAR2(30) DEFAULT 'PACKAGE__' NOT NULL
+ ,record_defaults_param_name VARCHAR2(30) DEFAULT 'DEFAULTS__' NOT NULL
+ ,record_default_package VARCHAR2(30)
+ ,record_default_defaults VARCHAR2(30) DEFAULT 'NULL'
+ ,assarray_schema_param_name VARCHAR2(30) DEFAULT 'SCHEMA__' NOT NULL
+ ,assarray_package_param_name VARCHAR2(30) DEFAULT 'PACKAGE__' NOT NULL
+ ,assarray_default_package VARCHAR2(30)
+ ,assarray_max_items NUMBER(3) DEFAULT 128 NOT NULL
  ,CONSTRAINT CK_recon_settings CHECK
     (
           rowtype_default_values_mode IN ('NONE','NULL','DEFAULT_AND_NONE','DEFAULT_AND_NULL')
@@ -79,6 +78,21 @@ END recon;
 
 CREATE OR REPLACE PACKAGE BODY recon
 IS
+  TYPE t_table_column IS RECORD
+    (
+     column_name VARCHAR2(30)
+    ,data_default VARCHAR2(32767) -- can fail for very long data_defaults!
+    );
+
+  TYPE t_table_columns IS TABLE OF recon.t_table_column;
+
+  TYPE t_function IS RECORD
+    (
+     function_head CLOB
+    ,function_body CLOB
+    );
+
+
   PROCEDURE add_table
     (
      p_table_owner recon_tables.table_owner%type DEFAULT sys_context('userenv', 'current_schema')
@@ -103,14 +117,15 @@ IS
   PROCEDURE make_packages
     (
      p_package_name VARCHAR2 DEFAULT 'R_'
+    ,p_types_package_name VARCHAR2 DEFAULT 'T_'
     ,p_schema_param_name VARCHAR2 DEFAULT 'SCHEMA__'
     ,p_default_schema VARCHAR2 DEFAULT sys_context('userenv', 'current_schema')
     )
   IS
-    c_package_name CONSTANT VARCHAR2(32)
-      := dbms_assert.simple_sql_name( p_package_name );
-    c_schema_param_name CONSTANT VARCHAR2(32)
-      := dbms_assert.simple_sql_name( p_schema_param_name );
+    c_package_name_enq CONSTANT VARCHAR2(32)
+      := dbms_assert.simple_sql_name( dbms_assert.enquote_name(p_package_name) );
+    c_schema_param_name_enq CONSTANT VARCHAR2(32)
+      := dbms_assert.simple_sql_name( dbms_assert.enquote_name(p_schema_param_name) );
     c_default_schema_enq CONSTANT VARCHAR2(32)
       := dbms_assert.simple_sql_name( dbms_assert.enquote_name(p_default_schema) );
 
@@ -121,6 +136,19 @@ IS
     v_sql_body CLOB;
     v_buffer CLOB;
   BEGIN
+    v_types_package_data :=
+      recon.make_types_package
+        (
+         p_types_package_name_enq => c_types_package_name_enq
+        ,p_default_schema_enq => c_default_schema_enq
+        );
+
+    recon.make_main_package
+      (
+       p_package_name_enq => c_package_name_enq
+      );
+  END make_packages;
+
     v_sql_head := 'CREATE OR REPLACE PACKAGE '||c_package_name||' IS'||chr(10);
     v_sql_body := 'CREATE OR REPLACE PACKAGE BODY '||c_package_name||' IS'||chr(10);
 
@@ -208,8 +236,14 @@ IS
         FROM all_tab_cols ata
         WHERE ata.owner = rec.table_owner
           AND ata.table_name = rec.table_name
+$IF DBMS_DB_VERSION.VERSION >= 11
+$THEN
           AND ata.virtual_column = 'NO'
-          AND ata.hidden_column = 'NO' -- conditional compilation!
+$END
+$IF DBMS_DB_VERSION.VERSION >= 12
+$THEN
+          AND ata.hidden_column = 'NO'
+$END
         ORDER BY ata.column_id;
 
         IF v_tab.COUNT = 0
@@ -294,5 +328,52 @@ IS
     --dbms_output.put_line(v_sql_head);
     --dbms_output.put_line(v_sql_body);
   END make_packages;
+
+  FUNCTION make_types_package
+    (
+
+    )
+
+  FUNCTION make_rowtype_constructor
+    (
+     schema_name VARCHAR2
+    ,table_name VARCHAR2
+    ,table_columns recon.t_table_columns
+
+    ,schema_param_name VARCHAR2
+    ,defaults_param_name VARCHAR2
+
+    ,schema_type VARCHAR2
+    ,defaults_type VARCHAR2
+
+    ,mode recon.t_mode
+    ,is_mode_set BOOLEAN
+    )
+  RETURN CLOB DETERMINISTIC
+  IS
+  BEGIN
+
+  END make_rowtype_constructor;
+
+  FUNCTION make_record_constructor
+    (
+
+    )
+  RETURN CLOB
+  IS
+  BEGIN
+
+  END make_record_constructor;
+
+  FUNCTION make_assarray_constructor
+    (
+
+    )
+  RETURN CLOB
+  IS
+  BEGIN
+
+  END make_assarray_constructor;
+
 END recon;
 /
