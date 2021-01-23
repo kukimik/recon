@@ -33,8 +33,8 @@ IS
     );
 
   TYPE t_tab_rowtype_data IS TABLE OF t_rowtype_data;
-  TYPE t_record_data IS TABLE OF t_record_data;
-  TYPE t_assarray_data IS TABLE OF t_assarray_data;
+  TYPE t_tab_record_data IS TABLE OF t_record_data;
+  TYPE t_tab_assarray_data IS TABLE OF t_assarray_data;
 
   TYPE t_pair_clob IS RECORD ( c1 CLOB, c2 CLOB );
 
@@ -436,7 +436,7 @@ IS
     ,p_return_type VARCHAR2
     ,p_variable_declarations CLOB DEFAULT NULL
     ,p_body CLOB DEFAULT NULL
-    ,p_return CLOB
+    ,p_return CLOB DEFAULT NULL
     )
     RETURN recon.t_pair_clob DETERMINISTIC
     IS
@@ -460,9 +460,13 @@ IS
         || v_variable_declarations
         || 'BEGIN '
         || v_body
-        || 'RETURN '
-        || v_return
-        || '; END '
+        || CASE
+             WHEN p_return IS NOT NULL
+             THEN 'RETURN '
+               || v_return
+               || ';'
+           END
+        || 'END '
         || p_function_name_enq
         || ';'
         || chr(10);
@@ -635,23 +639,83 @@ $END
 
   FUNCTION make_rowtype_constructor
     (
-     schema_name VARCHAR2
-    ,table_name VARCHAR2
-    ,table_columns recon.t_table_columns
+     p_schema_name_enq VARCHAR2
+    ,p_table_name_enq VARCHAR2
+    ,p_table_columns recon.t_table_columns
 
-    ,schema_param_name VARCHAR2
-    ,defaults_param_name VARCHAR2
+    ,p_schema_param_name_enq VARCHAR2
+    ,p_mode_param_name_enq VARCHAR2
 
-    ,schema_type VARCHAR2
-    ,defaults_type VARCHAR2
+    ,p_schema_type VARCHAR2
+    ,p_defaults_type VARCHAR2
 
-    ,mode recon.t_mode
-    ,is_mode_set BOOLEAN
+    ,p_mode recon.t_mode
+    ,p_is_mode_set BOOLEAN
     )
-  RETURN CLOB DETERMINISTIC
+  RETURN recon.t_pair_clob DETERMINISTIC
   IS
+    c_full_table_name CONSTANT VARCHAR2(100)
+      := p_schema_name_enq||'.'||p_table_name_enq;
+    c_rowtype CONSTANT VARCHAR2(100)
+      := c_full_table_name||'%rowtype';
+    v_parameters CLOB;
+    v_assignments CLOB;
   BEGIN
+    TYPE t_table_column IS RECORD
+      (
+       column_name VARCHAR2(30)
+      ,data_default VARCHAR2(32767) -- can fail for very long data_defaults!
+      );
 
+    FOR ii IN 1..p_table_columns.COUNT
+    LOOP
+      DECLARE
+        c_column_name_enq CONSTANT VARCHAR2(32)
+          := dbms_assert.simple_sql_name(dbms_assert.enquote_name(p_table_columns(ii).column_name));
+      BEGIN
+        v_parameters :=
+            v_parameters
+          ||c_column_name_enq
+          ||' '
+          ||p_schema_name_enq
+          ||'.'
+          ||p_table_name_enq
+          ||'.'
+          ||c_column_name_enq
+          ||'%type:=NULL'
+          ||','
+          ||chr(10);
+        v_assignments :=
+            v_assignments
+          ||'v_r.'
+          ||c_column_name_enq
+          ||':='
+          ||p_table_name_enq -- this is also the name of the constructor function
+          ||'.'
+          ||c_column_name_enq
+          ||';'
+          ||chr(10);
+      END;
+    END LOOP;
+
+    RETURN recon.make_function
+      (
+       p_function_name_enq => p_table_name_enq
+      ,p_parameters
+        => v_parameters
+        || !!! p_schema_param_name_enq VARCHAR2
+           !!! p_mode_param_name_enq VARCHAR2
+      ,p_return_type => c_rowtype
+      ,p_body
+         => 'DECLARE ' -- the inner block allows to avoid a name clash between the variable v_r and function parametrs
+         || 'v_r '
+         || c_rowtype
+         || ';'
+         || 'BEGIN '
+         || v_assignments
+         || 'RETURN v_r;'
+         || 'END;'
+      );
   END make_rowtype_constructor;
 
   FUNCTION make_record_constructor
